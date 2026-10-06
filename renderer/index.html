@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>Hexo 控制台</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="shell" id="shell">
+      <header class="titlebar">
+        <div class="app-title">
+          <!-- 状态点叠在头像右下角，所以要有个定位容器 -->
+          <span class="app-avatar-wrap">
+            <img class="app-avatar" src="avatar.jpg" alt="Hexo 控制台" title="Hexo 控制台" />
+            <span id="liveDot" class="live-dot" title="本地预览未运行"></span>
+          </span>
+        </div>
+        <div class="window-actions">
+          <button id="pinBtn" class="icon-button" type="button" title="置顶（浮在其他窗口上方）" aria-pressed="false">⇧</button>
+          <button id="minBtn" class="icon-button" type="button" title="最小化">−</button>
+          <button id="closeBtn" class="icon-button" type="button" title="退出">×</button>
+        </div>
+      </header>
+
+      <!-- 设置面板：从标题栏下方往下展开，把下面的内容压下去（与 token-monitor 同构） -->
+      <section id="settingsPanel" class="settings-panel hidden">
+        <!-- 站点 -->
+        <div class="settings-group settings-collapsible-group">
+          <button
+            id="settingsSiteToggle"
+            class="settings-section-toggle"
+            type="button"
+            aria-expanded="false"
+            aria-controls="settingsSiteBody"
+          >
+            <span class="settings-section-heading">
+              <span class="settings-section-icon icon-sec-general" aria-hidden="true"></span>
+              <span>站点</span>
+            </span>
+            <span class="settings-section-meta">
+              <span id="siteSummary" class="settings-section-summary"></span>
+              <span class="settings-section-disclosure" aria-hidden="true"></span>
+            </span>
+          </button>
+          <div id="settingsSiteBody" class="settings-section-details accordion-animated-container hidden">
+            <div class="settings-section-details-inner accordion-animation-inner">
+              <label class="field">
+                <span class="field-label">Hexo 目录</span>
+                <span class="input-row">
+                  <input id="hexoRootInput" type="text" autocomplete="off" spellcheck="false" />
+                  <button id="browseBtn" class="mini-btn" type="button">选择</button>
+                </span>
+              </label>
+              <label class="field">
+                <span class="field-label">线上地址</span>
+                <input id="liveUrlInput" type="text" autocomplete="off" spellcheck="false" />
+              </label>
+              <label class="field">
+                <span class="field-label">预览端口</span>
+                <input id="portInput" type="number" min="1" max="65535" />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- 外观 -->
+        <div class="settings-group settings-collapsible-group">
+          <button
+            id="settingsLookToggle"
+            class="settings-section-toggle"
+            type="button"
+            aria-expanded="false"
+            aria-controls="settingsLookBody"
+          >
+            <span class="settings-section-heading">
+              <span class="settings-section-icon icon-sec-appearance" aria-hidden="true"></span>
+              <span>外观</span>
+            </span>
+            <span class="settings-section-meta">
+              <span id="lookSummary" class="settings-section-summary"></span>
+              <span class="settings-section-disclosure" aria-hidden="true"></span>
+            </span>
+          </button>
+          <div id="settingsLookBody" class="settings-section-details accordion-animated-container hidden">
+            <div class="settings-section-details-inner accordion-animation-inner">
+              <div class="settings-item">
+                <span class="settings-item-text">
+                  <span class="settings-item-title">背景图</span>
+                </span>
+                <span class="settings-item-actions">
+                  <button id="chooseBgBtn" class="mini-btn" type="button">选择</button>
+                  <button id="clearBgBtn" class="mini-btn hidden" type="button">清除</button>
+                </span>
+                <!-- 描述放在直接子级：参考的 .settings-item > .settings-item-desc 会把它
+                     按 flex-basis:100% + order:3 顶到第二行独占整行，长路径因此不会把
+                     右侧按钮挤下去。 -->
+                <span id="bgDesc" class="settings-item-desc">未设置</span>
+              </div>
+              <label class="field">
+                <span class="field-label">
+                  <span class="slider-label">
+                    <span>背景透明度</span>
+                    <button id="resetAlphaButton" class="reset-appearance-button reset-inline" type="button" title="恢复默认（28%）" aria-label="恢复默认背景透明度">↺</button>
+                  </span>
+                  <span id="alphaValue" class="field-value">28%</span>
+                </span>
+                <input id="alphaInput" type="range" min="0" max="100" step="1" value="28" />
+              </label>
+              <label class="field">
+                <span class="field-label">
+                  <span class="slider-label">
+                    <span>玻璃</span>
+                    <button id="resetGlassButton" class="reset-appearance-button reset-inline" type="button" title="恢复默认（68）" aria-label="恢复默认玻璃">↺</button>
+                  </span>
+                  <span id="glassValue" class="field-value">68</span>
+                </span>
+                <input id="glassInput" type="range" min="0" max="100" step="1" value="68" />
+              </label>
+              <label class="field">
+                <span class="field-label">
+                  <span class="slider-label">
+                    <span title="玻璃背后模糊的半径（px）—— 想看内存占用时可以把它调小">模糊</span>
+                    <button id="resetDepthButton" class="reset-appearance-button reset-inline" type="button" title="恢复默认（32）" aria-label="恢复默认模糊半径">↺</button>
+                  </span>
+                  <span id="depthValue" class="field-value">32</span>
+                </span>
+                <input id="blurInput" type="range" min="0" max="100" step="1" value="32" />
+              </label>
+              <label class="field">
+                <span class="field-label">
+                  <span class="slider-label">
+                    <span>缩放</span>
+                    <button id="resetZoomButton" class="reset-appearance-button reset-inline" type="button" title="恢复默认（100%）" aria-label="恢复默认缩放">↺</button>
+                  </span>
+                  <span id="zoomValue" class="field-value">100%</span>
+                </span>
+                <input id="zoomInput" type="range" min="70" max="160" step="5" value="100" />
+              </label>
+              <div class="settings-item">
+                <span class="settings-item-text">
+                  <span class="settings-item-title">系统毛玻璃</span>
+                </span>
+                <input id="systemGlassInput" class="switch" type="checkbox" />
+                <!-- 描述放直接子级：参考的 .settings-item > .settings-item-desc 会让它独占一行 -->
+                <span class="settings-item-desc">macOS 26 上旧的原生材质有已知问题（切回窗口时可能先闪一片灰），所以那里默认关闭；关掉后底色由页面自己画</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 标语 -->
+        <div class="settings-group settings-collapsible-group">
+          <button
+            id="settingsTypedToggle"
+            class="settings-section-toggle"
+            type="button"
+            aria-expanded="false"
+            aria-controls="settingsTypedBody"
+          >
+            <span class="settings-section-heading">
+              <span class="settings-section-icon icon-sec-typing" aria-hidden="true"></span>
+              <span>标语</span>
+            </span>
+            <span class="settings-section-meta">
+              <span id="typedSummary" class="settings-section-summary"></span>
+              <!-- 速度单独一段：左边的文案摘要被省略号截断时，它仍然完整可见 -->
+              <span id="typedSpeedMeta" class="settings-section-value">70ms</span>
+              <span class="settings-section-disclosure" aria-hidden="true"></span>
+            </span>
+          </button>
+          <div id="settingsTypedBody" class="settings-section-details accordion-animated-container hidden">
+            <div class="settings-section-details-inner accordion-animation-inner">
+              <label class="field">
+                <span class="field-label">文案</span>
+                  <input id="typedContentInput" type="text" placeholder="留空则用内置默认标语" autocomplete="off" spellcheck="false" />
+              </label>
+              <label class="field">
+                <span class="field-label">打字机上方小字</span>
+                <input id="sayTextInput" type="text" placeholder="留空则不显示" autocomplete="off" spellcheck="false" />
+              </label>
+              <label class="field">
+                <span class="field-label">底部署名</span>
+                <input id="signatureTextInput" type="text" placeholder="留空则不显示" autocomplete="off" spellcheck="false" />
+              </label>
+              <label class="field">
+                <span class="field-label">
+                  <span class="slider-label">
+                    <span>打印速度</span>
+                    <button
+                      id="resetTypedSpeed"
+                      class="reset-appearance-button reset-inline"
+                      type="button"
+                      title="恢复默认（70ms）"
+                      aria-label="恢复默认速度"
+                    >↺</button>
+                  </span>
+                  <span id="typedSpeedValue" class="field-value">70ms</span>
+                </span>
+                <input id="typedSpeedInput" class="slider-reversed" type="range" min="10" max="400" step="5" value="70" />
+              </label>
+              <div class="settings-actions">
+                <button id="saveTypedBtn" type="button">保存</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 行为 -->
+        <div class="settings-group settings-collapsible-group">
+          <button
+            id="settingsBehaviorToggle"
+            class="settings-section-toggle"
+            type="button"
+            aria-expanded="false"
+            aria-controls="settingsBehaviorBody"
+          >
+            <span class="settings-section-heading">
+              <span class="settings-section-icon icon-sec-main" aria-hidden="true"></span>
+              <span>行为</span>
+            </span>
+            <span class="settings-section-meta">
+              <span id="behaviorSummary" class="settings-section-summary"></span>
+              <span class="settings-section-disclosure" aria-hidden="true"></span>
+            </span>
+          </button>
+          <div id="settingsBehaviorBody" class="settings-section-details accordion-animated-container hidden">
+            <div class="settings-section-details-inner accordion-animation-inner">
+              <div class="settings-item">
+                <span class="settings-item-text">
+                  <span class="settings-item-title">本地预览用 Edge 打开</span>
+                  <span class="settings-item-desc">关闭后改用系统默认浏览器</span>
+                </span>
+                <input id="edgeBrowserInput" class="switch" type="checkbox" />
+              </div>
+              <div class="settings-item">
+                <span class="settings-item-text">
+                  <span class="settings-item-title">创建后打开文件</span>
+                  <span class="settings-item-desc">交给系统默认 Markdown 程序</span>
+                </span>
+                <input id="openAfterCreateInput" class="switch" type="checkbox" />
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </section>
+
+              <!-- 打字机（对标 token-monitor 顶部 .total-panel 的位置与排版） -->
+          <section class="hero" id="hero">
+            <!-- 打字机上方的小字，样式对标参考的 TOTAL TOKENS；文案可在设置里改 -->
+            <div class="hero-label" id="heroLabel">SAY</div>
+            <div class="hero-text">
+              <span id="typedText"></span><span class="typed-cursor" aria-hidden="true">_</span>
+            </div>
+            <!-- 署名的位置对标参考的 cost 行：紧跟在大字下方，左对齐 -->
+            <div class="signature" id="signature">Qian_Chang</div>
+          </section>
+
+          <!-- 目录 + 三个按钮：滚动时钉在顶部，和上方打字机一样常驻 -->
+          <div class="create-head hidden" id="createHead">
+            <label class="field">
+            <span class="field-label">目录</span>
+            <select id="dirSelect"></select>
+            <input
+            id="dirInput"
+            class="hidden"
+            type="text"
+            placeholder="新目录，如 diary/202610"
+            autocomplete="off"
+            spellcheck="false"
+            />
+            </label>
+            <!-- 目录单独置顶；下面三个按钮决定这一页显示哪块（照参考的 .tabs） -->
+            <nav class="tabs create-tabs" id="createTabs" aria-label="新建页分栏">
+              <span class="tab-indicator" aria-hidden="true"></span>
+              <button class="tab active" type="button" data-mode="post">创建博客</button>
+                <button class="tab" type="button" data-mode="image">添加图片</button>
+            </nav>
+          </div>
+
+<main class="panel" id="panel">
+        <!-- 三个视图，一次只显示一个，由左下角胶囊切换（做法照 token-monitor 的 viewSwitcher） -->
+
+        <section class="view" id="viewHome" data-view="home">
+          <!-- 快捷操作 -->
+          <section class="module" id="moduleQuick" data-module="quick">
+            <div class="module-head">
+              <span class="module-label">快捷操作</span>
+              <span class="module-head-end"><span class="module-meta" id="quickMeta">已停止</span></span>
+            </div>
+            <div class="module-body-static">
+              <button id="liveBtn" class="row row--action" type="button">
+                <span class="row-mark icon-external" aria-hidden="true"></span>
+                <span class="row-main">
+                  <span class="row-name">打开线上博客</span>
+                  <span class="row-sub" id="liveUrlText"></span>
+                </span>
+                <span class="row-end"><span class="row-chevron" aria-hidden="true">↗</span></span>
+              </button>
+
+              <div class="row">
+                <span class="row-mark icon-preview" aria-hidden="true"></span>
+                <span class="row-main">
+                  <span class="row-name">本地预览</span>
+                  <span class="row-sub" id="previewDesc">停止状态</span>
+                </span>
+                <span class="row-end">
+                  <input id="previewToggle" class="switch" type="checkbox" aria-label="本地预览开关" />
+                </span>
+              </div>
+            </div>
+          </section>
+
+          <!-- 活动：常驻显示，不折叠 -->
+          <!-- 活动：常驻显示，不折叠 -->
+          <section class="module" id="moduleActivity" data-module="activity">
+            <div class="module-head">
+              <span class="module-label">活动</span>
+              <span class="module-head-end">
+                <span class="module-meta" id="activityMeta">—</span>
+                <!-- 照参考：标题右侧那颗是趋势图标（它那里同时是"跳转"按钮，本项目只作标识） -->
+                <button id="activityRangeBtn" class="mini-btn" type="button" title="切换统计范围（近期 / 本月 / 季度 / 半年 / 一年）">近期</button>
+                <span class="module-jump" aria-hidden="true"></span>
+              </span>
+            </div>
+            <div class="module-body-static">
+                <div class="activity-scroll">
+                  <svg id="activitySvg" class="activity-heatmap" role="img" aria-label="提交活动热力图"></svg>
+                </div>
+                <p id="activityEmpty" class="activity-empty hidden"></p>
+                <p id="activityCaption" class="activity-caption"></p>
+                <!-- 悬停提示：固定定位，定位算法照参考的 moveHomeActivityTooltip -->
+                <div id="activityTooltip" class="activity-tooltip" role="tooltip" aria-hidden="true">
+                  <span class="activity-tooltip-row">
+                    <span id="activityTooltipCount" class="activity-tooltip-count">0</span>
+                    <span class="activity-tooltip-label">次提交</span>
+                  </span>
+                  <span id="activityTooltipDate" class="activity-tooltip-date"></span>
+                </div>
+            </div>
+          </section>
+        </section>
+
+        <section class="view hidden" id="viewCreate" data-view="create">
+          <section class="module" id="moduleCreate" data-module="create">
+            <div class="module-body-static">
+                <label class="field">
+                  <span class="field-label">标题 <em class="req">*</em></span>
+                  <input id="titleInput" type="text" placeholder="Git使用" autocomplete="off" spellcheck="false" />
+                </label>
+
+              <!-- 日期与置顶并成一行；分类、标签各自一行 -->
+              <div class="field-row">
+  <label class="field">
+  <span class="field-label">日期</span>
+  <input id="dateInput" type="text" placeholder="留空 = 现在"
+                    title="留空 = 当前时间；格式 YYYY-MM-DD HH:mm:ss" autocomplete="off" spellcheck="false" />
+  </label>
+  <label class="field">
+  <span class="field-label">置顶 sticky</span>
+  <input id="stickyInput" type="number" step="1" placeholder="留空 = 不置顶"
+                    title="留空 = 不置顶；数字越大越靠前" />
+  </label>
+              </div>
+
+
+
+              <!-- 分类与标签并成一行 -->
+              <div class="field-row">
+  <label class="field">
+  <span class="field-label">分类</span>
+  <input id="categoriesInput" type="text" placeholder="逗号分隔"
+  title="支持中英文逗号、顿号、分号分隔" autocomplete="off" spellcheck="false" />
+  </label>
+  <label class="field">
+  <span class="field-label">标签</span>
+  <input id="tagsInput" type="text" placeholder="逗号分隔"
+  title="支持中英文逗号、顿号、分号分隔" autocomplete="off" spellcheck="false" />
+  </label>
+              </div>
+
+
+
+                <label class="field">
+                  <span class="field-label">摘要</span>
+                  <textarea id="abstractInput" rows="2" spellcheck="false"></textarea>
+                </label>
+
+                <div class="create-switch-row">
+                  <span class="field-label">创建图片目录（source/img/…）</span>
+                  <input id="assetFolderInput" class="switch" type="checkbox" />
+                </div>
+
+                <button id="createBtn" class="btn btn-primary" type="button">创建文章</button>
+
+                <div class="row">
+                  <span class="row-mark icon-doc" aria-hidden="true"></span>
+                  <span class="row-main">
+                    <span class="row-name">将写入</span>
+                    <span class="row-sub" id="pathHint">source/_posts/blog/&lt;标题&gt;.md</span>
+                  </span>
+                </div>
+            </div>
+          </section>
+
+          <!-- 粘贴图片：剪贴板里的图直接落到 source/img/<目录>/<文章>/ -->
+          <section class="module hidden" id="modulePasteImage">
+            <div class="module-head">
+              <span class="module-label">粘贴图片</span>
+              <span class="module-head-end">
+                <span class="module-meta" id="pasteMeta">Cmd+V</span>
+                <button id="pastePickBtn" class="mini-btn" type="button" title="从磁盘选择一张图片">选择文件</button>
+              </span>
+            </div>
+            <div class="module-body-static">
+              <div class="paste-zone" id="pasteZone" tabindex="0">
+                <button id="pasteClearBtn" class="paste-clear hidden" type="button" title="清除（Esc）" aria-label="清除粘贴的图片">×</button>
+                <img id="pastePreview" class="paste-preview hidden" alt="粘贴预览" />
+                <span class="paste-hint" id="pasteHint">点这里，然后 Cmd+V</span>
+              </div>
+              <!-- 文件名与文章并成一行 -->
+              <div class="field-row">
+  <label class="field">
+  <span class="field-label">文件名</span>
+  <input id="pasteNameInput" type="text" placeholder="1.png" autocomplete="off" spellcheck="false" />
+  </label>
+  <label class="field">
+  <span class="field-label">文章</span>
+  <select id="pastePostSelect"></select>
+  </label>
+              </div>
+              <div class="create-switch-row">
+                <span class="field-label">追加引用到文章末尾</span>
+                <input id="pasteAppendInput" class="switch" type="checkbox" checked />
+              </div>
+              <button id="pasteSaveBtn" class="btn btn-primary" type="button" disabled>保存图片</button>
+              <p class="activity-empty hidden" id="pasteLine"></p>
+            </div>
+          </section>
+        </section>
+
+        <section class="view hidden" id="viewDeploy" data-view="deploy">
+          <section class="module" id="moduleDeploy" data-module="deploy">
+            <div class="module-body-static">
+                <div class="row">
+                  <span class="row-mark icon-publish" aria-hidden="true"></span>
+                  <span class="row-main">
+                    <span class="row-name">发布到线上</span>
+                    <span class="row-sub">clean → generate → deploy 到 Pages</span>
+                  </span>
+                  <span class="row-end"><button id="publishBtn" class="mini-btn mini-btn--strong" type="button">发布</button></span>
+                </div>
+
+                <div class="row">
+                  <span class="row-mark icon-backup" aria-hidden="true"></span>
+                  <span class="row-main">
+                    <span class="row-name">备份源码</span>
+                    <span class="row-sub">commit + push 到 hexo-source</span>
+                  </span>
+                  <span class="row-end"><button id="backupBtn" class="mini-btn" type="button">备份</button></span>
+                </div>
+
+                <label class="field">
+                  <span class="field-label">备份提交信息</span>
+                  <input id="commitMessageInput" type="text" value="docs: update posts" autocomplete="off" spellcheck="false" />
+                </label>
+
+                <button id="bothBtn" class="btn btn-primary" type="button">发布 + 备份</button>
+
+                <div class="deploy-console">
+                  <div class="deploy-console-head">
+                    <span id="deployStatus">就绪</span>
+                    <span class="deploy-console-actions">
+                      <button id="cancelDeployBtn" class="mini-btn hidden" type="button">中止</button>
+                      <button id="clearLogBtn" class="mini-btn" type="button">清空</button>
+                    </span>
+                  </div>
+                  <pre id="deployLog" class="deploy-log"></pre>
+                </div>
+            </div>
+          </section>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <div id="viewSwitcher" class="view-switcher">
+          <button id="viewCurrent" class="view-switcher-current" type="button" title="下一个：新建">
+            <span id="viewIcon" class="view-switcher-icon icon-house" aria-hidden="true"></span>
+            <span id="viewPillLabel" class="view-switcher-label">主页</span>
+          </button>
+          <button
+            id="viewDisclosure"
+            class="view-switcher-disclosure"
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded="false"
+            aria-label="选择页面"
+          ></button>
+          <div id="viewMenu" class="view-switcher-menu hidden" role="menu" aria-label="选择页面">
+            <button class="view-switcher-menu-item is-current" type="button" role="menuitemradio" aria-checked="true" aria-current="page" data-view="home" title="主页">
+              <span class="view-switcher-icon icon-house" aria-hidden="true"></span>
+              <span class="view-switcher-menu-label">主页</span>
+            </button>
+            <button class="view-switcher-menu-item" type="button" role="menuitemradio" aria-checked="false" data-view="create" title="新建文章">
+              <span class="view-switcher-icon icon-doc" aria-hidden="true"></span>
+              <span class="view-switcher-menu-label">新建</span>
+            </button>
+            <button class="view-switcher-menu-item" type="button" role="menuitemradio" aria-checked="false" data-view="deploy" title="发布与备份">
+              <span class="view-switcher-icon icon-publish" aria-hidden="true"></span>
+              <span class="view-switcher-menu-label">发布</span>
+            </button>
+          </div>
+        </div>
+        <div class="bottombar-status" id="statusLine"><span class="status-dot" id="statusDot" aria-hidden="true"></span><span id="statusText">就绪</span></div>
+        <div class="utility-actions">
+          <button id="refreshBtn" class="refresh-button" type="button" title="刷新" aria-label="刷新">
+            <span class="refresh-button-icon" aria-hidden="true">↻</span>
+          </button>
+          <button id="settingsBtn" class="icon-button settings-icon-button" type="button" title="设置" aria-label="设置"></button>
+        </div>
+      </footer>
+    </div>
+
+    <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+    <script src="renderer.js"></script>
+  </body>
+</html>

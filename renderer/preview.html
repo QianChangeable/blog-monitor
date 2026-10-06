@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    />
+    <title>图片预览</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="shell preview-shell">
+      <header class="titlebar">
+        <div class="app-title">
+          <span class="preview-title" id="previewTitle">图片预览</span>
+        </div>
+        <div class="window-actions">
+          <button id="closeBtn" class="icon-button" type="button" title="关闭（Esc）">×</button>
+        </div>
+      </header>
+      <main class="preview-stage" id="previewStage">
+        <img id="previewImage" class="preview-image" alt="" />
+      </main>
+    </div>
+
+    <script src="preview.js"></script>
+  </body>
+</html>

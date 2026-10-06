@@ -1,0 +1,1738 @@
+/* Visual language taken from token-monitor: the tokens, the glass and the
+   switch geometry come from its stylesheet, and the flat module/hairline layout
+   mirrors its main view (.home-module / .home-list-row) rather than the bordered
+   cards of its settings panel. */
+:root {
+  color-scheme: dark;
+  --glass-rgb: 48, 52, 56;
+  --overlay-rgb: 255, 255, 255;
+  --line-rgb: 232, 238, 244;
+  --panel-rgb: 16, 21, 30;
+  --sunken-rgb: 4, 8, 13;
+  --glass-alpha: 0.68;
+  --line-alpha: 0.138;
+  --line-strong-alpha: 0.238;
+  --control-alpha: 0.049;
+  --glass: rgba(var(--glass-rgb), var(--glass-alpha));
+  /* 模糊参数和"当前用不用模糊"分开两个变量：底色被拉到完全不透明时（设置里
+     玻璃 = 100），这层 blur 一点都透不出来，renderer.js 的 applyGlass 会把
+     --glass-filter 换成 none。实测那一层值 ~16MB GPU。
+     参数只写在这里，JS 那边用 var(--glass-blur) 取，不复制一份。 */
+  --glass-blur: blur(32px) saturate(115%);
+  --glass-filter: var(--glass-blur);
+  --line: rgba(var(--line-rgb), var(--line-alpha));
+  --line-strong: rgba(var(--line-rgb), var(--line-strong-alpha));
+  --hairline: rgba(var(--line-rgb), 0.12);
+  --text: #eef5fb;
+  --number: #f3fbf7;
+  --muted: #a3adbb;
+  --accent: #b7ead4;
+  --accent-rgb: 183, 234, 212;
+  --success: #b7ead4;
+  --success-rgb: 183, 234, 212;
+  --blue-rgb: 115, 189, 245;
+  --red: #f47788;
+  --red-rgb: 244, 119, 136;
+  --shadow: rgba(0, 0, 0, 0.36);
+  --ui-font: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+  border-radius: 14px;
+  color: var(--text);
+  font-family: var(--ui-font);
+  font-size: 11px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+button, input, select, textarea { font: inherit; }
+button:focus { outline: none; }
+input, textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  /* 垂直间距全部交给 gap —— 之前我用各自的 margin 拼，结果每一段的间距都不一样，
+     设置面板和下方内容之间只剩 4px。参考就是这么做的。 */
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 12px 14px 14px;
+  overflow: hidden;
+  isolation: isolate;
+  border-radius: 14px;
+  clip-path: inset(0 round 14px);
+  background: var(--glass);
+  box-shadow: 0 22px 55px var(--shadow);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+}
+
+/* 有原生材质时，别在它上面再叠一层 Chromium 的模糊。
+   窗口后面已经由系统（macOS vibrancy / Windows acrylic）模糊过一次了，这一层属于
+   重复劳动；更麻烦的是窗口重新可见时它要重新采样背景，那一帧就是"变灰再变回来"。
+   参考在自己的原生材质模式下也是整条去掉的（见其 styles.css 的
+   html.native-liquid-glass .shell）。这里只去掉模糊、保留那层底色，
+   观感几乎不变 —— 因为两次模糊本来就作用于同一个背景。 */
+html.native-material .shell {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* The image is its own layer over the glass, never a replacement for it: the
+   glass keeps blurring whatever is behind the window and the image's opacity is
+   a separate setting, so either can be tuned without the other. */
+.shell.has-custom-background::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: linear-gradient(rgba(var(--glass-rgb), 0.18), rgba(var(--glass-rgb), 0.18)), var(--custom-background-image);
+  background-position: center;
+  background-size: cover;
+  opacity: var(--background-image-alpha, 0.28);
+}
+
+/* ---------------------------------------------------------------- titlebar */
+
+.titlebar {
+  -webkit-app-region: drag;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 30px;
+}
+
+.app-title {
+  display: flex;
+  align-items: center; /* 换成头像之后不再需要按文字基线对齐 */
+  min-width: 0;
+}
+.app-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+  /* 和原来的标题文字一样带投影，压在壁纸上不糊 */
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.42);
+  -webkit-user-drag: none;
+}
+.app-avatar:hover { box-shadow: 0 1px 8px rgba(0, 0, 0, 0.42), 0 0 0 1px var(--line-strong); }
+
+.app-avatar-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+/* 状态点当头像的右下角角标。
+   那圈环照参考 .row-live-dot 的做法：用 --panel-rgb 而不是写死颜色，它才会随主题
+   翻转，始终是"把角标和它压住的东西分开"的一道分隔，而不是一块暗斑。 */
+.live-dot {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #5b6471;
+  box-shadow: 0 0 0 1.5px rgb(var(--panel-rgb));
+  transition: background 200ms ease, box-shadow 200ms ease;
+}
+.live-dot.live {
+  background: var(--accent);
+  box-shadow: 0 0 0 1.5px rgb(var(--panel-rgb)), 0 0 6px rgba(var(--accent-rgb), 0.7);
+}
+
+.window-actions {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.icon-button {
+  width: 34px;
+  height: 26px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(var(--overlay-rgb), var(--control-alpha));
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.08);
+  /* 这里原来还有一层 backdrop-filter: blur(18px)。它和下面 .tabs / .activity-tooltip /
+     .view-switcher-menu 上那几层一样，都是多余的：
+     这些控件都长在 .shell 里面，而 .shell 自己已经 blur 过一次桌面了，
+     控件采样到的"背后"就是那层已经模糊过的玻璃 —— 再模糊一次看不出差别，
+     但每一个带 backdrop-filter 的元素都要自己的一张合成 surface。
+     实测（scripts/memory-bench.sh）：全窗口 16 处 backdrop-filter 时 GPU 进程
+     稳定在 ~153MB；只留 .shell 那一层、其余置 none，同样的画面掉到 ~81MB。 */
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.icon-button:hover {
+  border-color: var(--line-strong);
+  background: rgba(var(--overlay-rgb), 0.072);
+}
+
+/* --------------------------------------------------------------- 视图容器 */
+
+/* 一次只显示一个页面（主页 / 新建文章 / 发布与备份），由左下角胶囊切换。
+   面板自己的 gap 现在由这一层承担，所以这里要和 .panel 一致。 */
+.view {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  align-content: start;
+}
+.view.hidden { display: none; }
+
+/* -------------------------------------------------------------------- hero */
+
+/* 位置对标 token-monitor 的 .total-panel（标题栏下方、内容区最顶部那块）。
+   区别只有两点，都是这里才成立的：横向内边距取 0，好让文字与下面的模块左对齐；
+   字号用 clamp 收到能换行的范围 —— 那边是一个大数字，这边是一句话。 */
+.hero {
+  position: relative;
+  z-index: 1;
+  padding: 2px 0 12px;
+}
+.hero-text {
+  display: flex;
+  align-items: baseline;
+  gap: 1px;
+  margin-top: 8px;
+  min-height: 1.35em; /* 空串时也占位，打字过程不会把下面的内容顶来顶去 */
+  color: var(--number);
+  font-family: var(--display-font, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif);
+  font-weight: 500;
+  font-size: clamp(14px, 5.4vw, clamp(17px, 4.6vw, 21px));
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+/* 光标闪烁照抄 typed.js 自带的那条（你 Hexo 用的就是它）：
+   .typed-cursor { opacity: 1; animation: typedjsBlink 0.7s infinite }
+   @keyframes typedjsBlink { 50% { opacity: 0 } }
+
+   这条动画是常驻的（打字机 loop 为 false，打完最后一条光标会一直闪），
+   代价实测过、也认了：只要窗口在持续出帧，GPU 进程的 surface 池就不会退。
+   同一个窗口只差这一条 animation 是 53MB ↔ 144MB，约 +90MB。
+
+   试过三种便宜写法都不省：350ms 定时器切 class（每秒 ~3 帧而不是 60 帧）、
+   把窗口改成不透明、以及只在打字时闪（那样打完就不闪了，正是要避免的）。
+   所以这笔钱买的是"光标会闪"本身，跟帧率和透明窗口都无关。
+
+   哪天不想要这 90MB 了，把下面 animation 改回 none 即可。 */
+.typed-cursor {
+  color: var(--accent);
+  opacity: 1;
+  animation: typed-cursor-blink 0.7s infinite;
+}
+@keyframes typed-cursor-blink {
+  50% { opacity: 0; }
+}
+
+/* ------------------------------------------------------------ flat modules */
+
+.panel {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  /* 空间不够时由面板让位（flex-basis 0 + min-height 0 + 自己滚），
+     而不是压打字机 —— 打字机是常驻内容，被压就会溢出并被下面的模块盖住。 */
+/* 逐字对齐参考的 .breakdown：flex: 1 + min-height: 0 + 自身滚动 */
+  flex: 1;
+  min-height: 0;
+  overflow: hidden auto;
+  /* flex-basis must be 0, not auto. With `auto` this panel's content height
+     competed with the settings panel in the flex shrink pass, and the shrink was
+     split between them — which squeezed the settings panel to a fraction of its
+     height and cut a row in half. A zero basis contributes no shrink weight, so
+     this panel simply takes what is left over (the reference's
+     `.breakdown { flex: 1 }`). */
+  flex: 1 1 0;
+  /* The floor: an open settings panel may push this area down, but never past
+     this much. A flex item with min-height refuses to shrink below it, and the
+     settings panel — a scroll container, whose automatic minimum size is 0 —
+     yields instead and scrolls internally. The reference gets the same guarantee
+     for free from its hero block, which has no overflow and therefore also
+     refuses to shrink. */
+  /* 原来是 min-height: 140px —— 它把面板撑在 140px 不肯让位，
+     空间不够时就把底栏挤出窗口（参考的 .breakdown 是 min-height: 0）。 */
+  min-height: 0;
+  align-content: start;
+  gap: 12px;
+  overflow: hidden auto;
+  /* 参考的 .breakdown 在这里留了 padding-right: 2px 给滚动条，但同一份样式里
+     已经 scrollbar-width: none + ::-webkit-scrollbar 宽度为 0，那 2px 是死值，
+     只会让模块比设置卡片和底栏窄 2px（"差一点点贴合"就是它）。这里去掉。 */
+  scrollbar-width: none;
+}
+.panel::-webkit-scrollbar { width: 0; height: 0; }
+
+.module {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+  padding: 0 0 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+.module:last-child { padding-bottom: 0; border-bottom: 0; }
+
+.module-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.module-label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.module-head-end {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.module-meta {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.module-disclosure {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-right: 1px solid var(--muted);
+  border-bottom: 1px solid var(--muted);
+  transform: rotate(45deg) translate(-1px, -1px);
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.module-head[aria-expanded="true"] .module-disclosure {
+  transform: rotate(225deg) translate(-1px, -1px);
+}
+
+.module-body-static { display: grid; min-width: 0; gap: 9px; }
+
+/* ------------------------------------------------------------------- rows */
+
+.row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.row--action { cursor: pointer; }
+.row--action:focus-visible { outline: 1px solid rgba(var(--blue-rgb), 0.72); outline-offset: 2px; }
+.row--action:hover .row-name { color: var(--accent); }
+.row--action:hover .row-mark { color: var(--accent); }
+
+.row-mark {
+  justify-self: center;
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  background: currentColor;
+  color: var(--muted);
+  transition: color 140ms ease;
+}
+
+.row-main { display: grid; min-width: 0; gap: 1px; }
+.row-name {
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row-sub {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row-end {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.row-chevron {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+}
+.row--action:hover .row-chevron { color: var(--accent); }
+
+/* 分区卡右侧的数值段（标语卡的打印速度）。独立成段是为了让左边的摘要被省略号
+   截断时它仍然完整显示；数字用等宽字形，值变化时不会左右抖。 */
+.settings-section-value {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 9.5px;
+  line-height: 1.25;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------- 滑块行与重置按钮 */
+
+/* 左慢右快：typeSpeed 的数值语义不变（越大越慢），只把滑块的可视方向反过来，
+   这样"往右拖 = 打字更快"符合直觉。轨道渐变仍是左暗右亮，"更亮 = 更快"读起来一致。 */
+.slider-reversed { direction: rtl; }
+
+/* .slider-label / .reset-appearance-button / .reset-inline 逐字取自参考
+   （参考里 .slider-label 由 .settings-slider-item 限定为 flex-start + 6px 间距）。 */
+.slider-label { display: flex; align-items: center; justify-content: flex-start; gap: 6px; }
+
+.reset-appearance-button {
+  /* Glyph label, same reason as .tool-header-action. */
+  font-size: 16px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(var(--overlay-rgb), var(--control-alpha));
+  color: var(--muted);
+  cursor: pointer;
+}
+.reset-appearance-button:hover { border-color: var(--line-strong); color: var(--text); }
+.reset-inline { width: 18px; height: 18px; font-size: 10px; line-height: 1; }
+
+/* -------------------------------------------------------------------- 趋势 */
+
+/* 周期切换：照参考 .tabs + .tab-indicator —— 一个滑动的指示块，用 --period-index
+   驱动 transform。三个按钮等宽，选中项只用颜色区分（指示块在下面滑）。 */
+.tabs {
+  --period-index: 0;
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 3px;
+  width: 148px;
+  border: 1px solid rgba(var(--line-rgb), 0.09);
+  border-radius: 10px;
+  background: rgba(var(--overlay-rgb), 0.026);
+  box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.045);
+  /* 同上：.shell 已经模糊过一次，这里再模糊是重复劳动。 */
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.tab-indicator {
+  position: absolute;
+  z-index: 0;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 10px) / 3);
+  border: 1px solid rgba(var(--line-rgb), 0.13);
+  border-radius: 6px;
+  background: rgba(var(--overlay-rgb), 0.06);
+  box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.075);
+  pointer-events: none;
+  transform: translate3d(calc(var(--period-index) * (100% + 2px)), 0, 0);
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.tab {
+  position: relative;
+  z-index: 1;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 9px;
+}
+.tab.active { color: var(--accent); }
+.tab:hover { color: var(--text); }
+
+
+/* ------------------------------------------------------- 窄 / 矮窗口适配 */
+
+/* 窗口可以缩到 240×140。这个尺寸下横向只剩 ~212px，纵向 barely 放得下标题栏 +
+   打字机 + 底栏，所以：
+     · 底栏那行状态文字先让位（它只是提示，胶囊和按钮不能丢）
+     · 周期按钮不再固定 148px，改成占满一行
+     · 统计卡从两列变一列
+     · 面板的 min-height 放开，别把底栏顶出窗口 */
+@media (max-width: 320px) {
+  /* 只藏文字，保留状态点 —— 窄窗下也要能看出预览在不在跑 */
+  #statusText { display: none; }
+  .view-switcher { max-width: min(120px, 48%); }
+  .tabs { width: 100%; }
+  .module-head { flex-wrap: wrap; gap: 6px; }
+  .module-head-end { flex: 1 1 auto; }
+  .row { grid-template-columns: 10px minmax(0, 1fr) auto; }
+  .settings-section-meta { max-width: 96px; }
+}
+
+/* 紧凑态：窗口小到只够显示标题栏 + 打字机时，底栏（胶囊/状态/按钮）整块移除，
+   小窗就是安静看打字机的地方。阈值贴着 WINDOW_LIMITS 的下限（240×140）取。
+   用 display: none 而不是 opacity: 0 —— 一个透明的固定层会挡住窗口底部的点击。
+   也不做悬停揭示：那会让"只想安静看"的小窗被鼠标划过就打搅。 */
+/* 矮窗口：面板不许再撑着 140px 的下限，否则底栏会被挤出可视区 */
+/* 紧凑态阈值：逐条照抄参考（它那边就是按高度分三档，不是按"剩余空间"算）。
+   我先前自己发明的"量剩余高度"和猜的 260/220，跟参考并不一致，撤掉了。
+   注意参考这里没有做宽度档的底栏隐藏 —— 窄的时候靠胶囊标签省略号自己收。 */
+
+
+/* -------------------------------------------------------------- 活动热力图 */
+
+/* 几何与 4 级配色照参考的 .home-activity-canvas（SVG 网格）：空格子几乎透明，
+   分级用蓝色阶梯（参考即便主题是薄荷色，热力图也是这套蓝）。 */
+.activity-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.activity-scroll::-webkit-scrollbar { display: none; }
+.activity-heatmap { display: block; overflow: visible; }
+.activity-heatmap .heat {
+  fill: rgba(var(--overlay-rgb), 0.03);
+  transition: fill 140ms ease;
+}
+/* 不按次数分深浅：博客的提交"有就行"，统一一个颜色（取参考第 3 级的调子） */
+.activity-heatmap .heat.has-commit { fill: rgba(150, 210, 255, 0.8); }
+.activity-heatmap .heat:hover { stroke: rgba(var(--line-rgb), 0.9); stroke-width: 1; }
+.activity-heatmap .heat-month { fill: rgba(var(--line-rgb), 0.5); font-size: 9px; }
+.activity-empty, .activity-caption { margin: 0; color: var(--muted); font-size: 9.5px; line-height: 1.5; }
+.activity-caption { margin-top: 6px; font-variant-numeric: tabular-nums; }
+
+/* 悬停提示：逐字照参考的 .home-activity-tooltip（固定定位、面板底色 + 毛玻璃、
+   数值用 --number、上下两行）。 */
+.activity-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 72px;
+  padding: 6px 9px;
+  border: 1px solid rgba(var(--line-rgb), 0.16);
+  border-radius: 8px;
+  background: rgba(var(--panel-rgb), 0.58);
+  color: var(--text);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(var(--overlay-rgb), 0.08);
+  /* 同上。这个 tooltip 只出现在热力图上，本来就贴着玻璃。 */
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+.activity-tooltip.visible { opacity: 1; }
+.activity-tooltip-row { display: inline-flex; align-items: baseline; gap: 4px; font-weight: 700; }
+.activity-tooltip-count { color: var(--number); font-variant-numeric: tabular-nums; }
+.activity-tooltip-label, .activity-tooltip-date { color: var(--muted); font-weight: 500; }
+.activity-tooltip-date { font-size: 9px; }
+
+/* 模块标题右侧的图标，规格照参考的 .home-module-jump（13px、muted、0.8 透明、上移 1px）。 */
+
+.module-jump {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  background: currentColor;
+  color: var(--muted);
+  opacity: 0.8;
+  transform: translateY(-1px);
+  -webkit-mask: url("icons/trends.svg") center / contain no-repeat;
+  mask: url("icons/trends.svg") center / contain no-repeat;
+}
+/* 通用 .hidden 只覆盖了 select/input/按钮那几类，svg 与 p 会漏 —— 这里补上 */
+.activity-heatmap.hidden, .activity-empty.hidden { display: none; }
+
+/* ------------------------------------------------------------------ icons */
+
+.icon-external { -webkit-mask: url("icons/external.svg") center / contain no-repeat; mask: url("icons/external.svg") center / contain no-repeat; }
+.icon-preview { -webkit-mask: url("icons/preview.svg") center / contain no-repeat; mask: url("icons/preview.svg") center / contain no-repeat; }
+.icon-doc { -webkit-mask: url("icons/doc.svg") center / contain no-repeat; mask: url("icons/doc.svg") center / contain no-repeat; }
+.icon-publish { -webkit-mask: url("icons/publish.svg") center / contain no-repeat; mask: url("icons/publish.svg") center / contain no-repeat; }
+.icon-backup { -webkit-mask: url("icons/backup.svg") center / contain no-repeat; mask: url("icons/backup.svg") center / contain no-repeat; }
+.icon-gear { -webkit-mask: url("icons/lucide-settings.svg") center / contain no-repeat; mask: url("icons/lucide-settings.svg") center / contain no-repeat; }
+.icon-house { -webkit-mask: url("icons/lucide-house.svg") center / contain no-repeat; mask: url("icons/lucide-house.svg") center / contain no-repeat; }
+
+/* ------------------------------------------------------------------ fields */
+
+.field { display: grid; min-width: 0; gap: 4px; color: var(--muted); font-size: 11px; }
+.field-label { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.field-value { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+.req { color: var(--accent); font-style: normal; }
+
+input[type="text"],
+input[type="number"],
+textarea {
+  width: 100%;
+  min-height: 26px;
+  padding: 5px 8px;
+  border: 1px solid rgba(var(--line-rgb), 0.14);
+  border-radius: 6px;
+  background: rgba(var(--sunken-rgb), 0.48);
+  color: var(--text);
+  font-size: 11px;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+input[type="text"]:focus,
+input[type="number"]:focus,
+textarea:focus {
+  outline: none;
+  border-color: rgba(var(--blue-rgb), 0.72);
+  background: rgba(var(--sunken-rgb), 0.62);
+}
+input::placeholder, textarea::placeholder { color: rgba(163, 173, 187, 0.55); }
+textarea { min-height: 46px; line-height: 1.55; resize: vertical; }
+.input-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+
+input[type="range"] {
+  width: 100%;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* 设置面板里的滑块照抄参考：一条 2px 的渐细轨道 + 13px 圆钮，
+   而不是交给原生 accent-color（原生控件在 macOS 上明显更粗）。 */
+.settings-panel input[type="range"] {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.settings-panel input[type="range"]::-webkit-slider-runnable-track {
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(to right, rgba(var(--accent-rgb), 0.22), rgb(var(--accent-rgb)));
+}
+.settings-panel input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -5.5px;
+  border-radius: 50%;
+  background: rgb(var(--accent-rgb));
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+/* Styled native select: same sunken surface as the text inputs beside it, with
+   the platform arrow replaced by a chevron so macOS and Windows match. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  min-height: 26px;
+  padding: 5px 26px 5px 8px;
+  border: 1px solid rgba(var(--line-rgb), 0.14);
+  border-radius: 6px;
+  background-color: rgba(var(--sunken-rgb), 0.48);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0.5l4 4 4-4' fill='none' stroke='%23a3adbb' stroke-width='1.2'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+select:hover { border-color: var(--line-strong); }
+select:focus {
+  outline: none;
+  border-color: rgba(var(--blue-rgb), 0.72);
+  background-color: rgba(var(--sunken-rgb), 0.62);
+}
+select option { background: rgb(var(--panel-rgb)); color: var(--text); }
+
+/* The folder picker swaps the select for a free-text input. Scoped to form
+   controls so the toast's own .hidden transition is untouched. */
+select.hidden,
+input.hidden { display: none; }
+
+.hint {
+  color: var(--muted);
+  font-size: 9.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------- controls */
+
+/* iOS-style switch, same geometry as token-monitor's checkbox-label switch. */
+.switch {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: 0 0 auto;
+  position: relative;
+  width: 34px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid rgba(var(--line-rgb), 0.16);
+  border-radius: 999px;
+  background: rgba(var(--sunken-rgb), 0.55);
+  cursor: pointer;
+  transition: background 180ms ease, border-color 180ms ease;
+}
+.switch::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--muted);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), background 180ms ease;
+}
+.switch:checked {
+  border-color: rgba(var(--accent-rgb), 0.5);
+  background: rgba(var(--accent-rgb), 0.88);
+}
+.switch:checked::before {
+  transform: translateX(14px);
+  background: rgb(var(--panel-rgb));
+}
+.switch:focus-visible { outline: 1px solid rgba(var(--blue-rgb), 0.72); outline-offset: 2px; }
+.switch:disabled { opacity: 0.4; cursor: default; }
+
+.btn {
+  min-height: 28px;
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(var(--overlay-rgb), var(--control-alpha));
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.08);
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+  justify-self: start;
+}
+.btn:hover { border-color: var(--line-strong); background: rgba(var(--overlay-rgb), 0.072); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: 0.45; cursor: default; transform: none; }
+
+.btn-primary {
+  width: 100%;
+  justify-self: stretch;
+  color: var(--accent);
+  border-color: rgba(var(--accent-rgb), 0.45);
+  background: rgba(var(--accent-rgb), 0.12);
+}
+.btn-primary:hover {
+  border-color: rgba(var(--accent-rgb), 0.62);
+  background: rgba(var(--accent-rgb), 0.2);
+}
+
+.mini-btn {
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: rgba(var(--overlay-rgb), var(--control-alpha));
+  color: var(--muted);
+  font-size: 10px;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+.mini-btn:hover { border-color: var(--line-strong); color: var(--text); }
+.mini-btn:disabled { opacity: 0.45; cursor: default; }
+.mini-btn.hidden { display: none; }
+.mini-btn--strong {
+  color: var(--accent);
+  border-color: rgba(var(--accent-rgb), 0.4);
+  background: rgba(var(--accent-rgb), 0.1);
+}
+.mini-btn--strong:hover { border-color: rgba(var(--accent-rgb), 0.6); color: var(--accent); }
+
+/* ------------------------------------------------------- publish / backup */
+
+.deploy-console { display: grid; gap: 4px; min-width: 0; }
+
+.deploy-console-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+.deploy-console-actions { display: inline-flex; gap: 4px; flex: 0 0 auto; }
+
+/* Live pipeline output. Selectable — the whole point is being able to copy an
+   error out of it. */
+.deploy-log {
+  margin: 0;
+  height: 132px;
+  padding: 7px 8px;
+  overflow: auto;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: rgba(var(--sunken-rgb), 0.55);
+  color: var(--muted);
+  font-family: var(--ui-font);
+  font-size: 9.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.deploy-log:empty::before {
+  content: "（暂无输出）";
+  color: rgba(163, 173, 187, 0.45);
+}
+.deploy-log::-webkit-scrollbar { width: 6px; }
+.deploy-log::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: rgba(var(--line-rgb), 0.18);
+}
+
+/* ==========================================================================
+   底栏（视图切换胶囊 + 刷新/设置按钮）：逐字取自 token-monitor 的
+   renderer/styles.css 基础态（MIT）。
+   注意：这里*不是* html.native-liquid-glass 那套胶囊变体 —— 参考实机截图里
+   是 7px 圆角矩形，说明它并未启用原生玻璃。此前按胶囊照抄是错的场景。
+   ========================================================================== */
+
+:is(.view-switcher-current, .view-switcher-disclosure) {
+  display: inline-flex;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(var(--line-rgb), 0.18);
+  background: rgba(var(--overlay-rgb), var(--control-alpha));
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.view-switcher-current {
+  min-width: 0;
+  flex: 1 1 auto;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: 7px 0 0 7px;
+  border-right: 0;
+  color: var(--muted);
+}
+
+.view-switcher-disclosure {
+  width: 24px;
+  flex: 0 0 24px;
+  padding: 0;
+  border-radius: 0 7px 7px 0;
+  color: var(--muted);
+}
+
+.view-switcher-current:hover,
+.view-switcher-current:focus-visible,
+.view-switcher-disclosure:hover,
+.view-switcher-disclosure:focus-visible,
+.view-switcher.is-open .view-switcher-current,
+.view-switcher.is-open .view-switcher-disclosure {
+  border-color: rgba(var(--accent-rgb), 0.24);
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--text);
+}
+
+.view-switcher-current:focus-visible,
+.view-switcher-disclosure:focus-visible,
+.view-switcher-menu-item:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.32);
+  outline-offset: 1px;
+}
+
+.view-switcher-disclosure::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform 140ms ease;
+}
+
+.view-switcher.is-open .view-switcher-disclosure::before {
+  transform: translateY(2px) rotate(225deg);
+}
+
+/* 窄窗时标签自己收掉，只留图标 + 展开框（参考的 .view-switcher-label 就是
+   min-width:0 + 省略号）。图标和展开框都是 flex: 0 0 auto / 固定宽度，
+   所以标签再窄也不会和它们重叠 —— 参考那边图标和展开框重叠是它的 bug。 */
+#viewPillLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.view-switcher-icon {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  background: currentColor;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+.view-switcher-label {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.view-switcher-menu {
+  padding: 4px;
+  border: 1px solid rgba(var(--line-rgb), 0.22);
+  border-radius: 7px;
+  background:
+    linear-gradient(180deg, rgba(var(--overlay-rgb), 0.075), rgba(var(--overlay-rgb), 0.025)),
+    rgba(var(--glass-rgb), 0.76);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(var(--overlay-rgb), 0.1);
+  /* 同上。弹出菜单是 .shell 的子节点，采样到的就是那层玻璃。 */
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.view-switcher-menu {
+  position: absolute;
+  z-index: 12;
+  left: 0;
+  bottom: calc(100% + 6px);
+  display: grid;
+  width: 100%;
+  max-height: min(280px, calc(100vh - 84px));
+  gap: 2px;
+  overflow: hidden auto;
+  transform-origin: left bottom;
+  opacity: 1;
+  visibility: visible;
+  filter: blur(0);
+  transform: translateY(0) scale(1);
+  transition:
+    opacity 190ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 190ms cubic-bezier(0.22, 1, 0.36, 1),
+    filter 190ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 0s;
+  will-change: opacity, transform, filter;
+}
+
+.view-switcher-menu.hidden {
+  /* Animates out rather than disappearing, so it must keep its box. Higher
+     specificity than the blanket `.hidden`, and matching weight to beat it. */
+  display: grid !important;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(6px) scale(0.985);
+  filter: blur(2px);
+  transition-duration: 130ms, 130ms, 130ms, 0s;
+  transition-delay: 0s, 0s, 0s, 130ms;
+}
+
+.view-switcher-menu-item {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  text-align: left;
+}
+
+.view-switcher-menu-item:hover,
+.view-switcher-menu-item:focus-visible {
+  background: rgba(var(--overlay-rgb), 0.07);
+  color: var(--text);
+}
+
+.view-switcher-menu-item[aria-checked="true"] {
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
+}
+
+.view-switcher-menu-label {
+  min-width: 0;
+  overflow: hidden;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon-button, .refresh-button, .settings-actions button {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(var(--overlay-rgb), var(--control-alpha));
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.08);
+  /* 同上：.refresh-button / .settings-actions button 共用这条。 */
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.icon-button { width: 34px; height: 28px; padding: 0; font-size: 14px; line-height: 1; }
+
+.icon-button:hover, .refresh-button:hover, .settings-actions button:hover { border-color: var(--line-strong); background: rgba(var(--overlay-rgb), 0.072); }
+
+/* 「保存」按钮：参考里它是 .settings-actions 里的普通按钮（与 .icon-button 共用底色，
+   30px 高、11px 字、无强调色）。下面三条逐字取自参考。 */
+.settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.settings-actions button { min-height: 30px; padding: 0 10px; border-radius: 8px; font-size: 11px; white-space: nowrap; }
+.settings-actions button:disabled { opacity: 0.38; cursor: default; }
+.settings-actions button:disabled:hover { border-color: var(--line); background: rgba(var(--overlay-rgb), var(--control-alpha)); }
+
+.refresh-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  width: 34px;
+  height: 30px;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  transition: border-color 160ms cubic-bezier(0.25, 1, 0.5, 1), background 160ms cubic-bezier(0.25, 1, 0.5, 1), color 160ms cubic-bezier(0.25, 1, 0.5, 1), box-shadow 160ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.refresh-button-icon {
+  display: inline-block;
+  position: relative;
+  z-index: 1;
+  width: 1em;
+  height: 1em;
+  line-height: 1;
+  text-align: center;
+  transform-origin: 50% 50%;
+  transition: transform 120ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.refresh-button:active:not(:disabled) .refresh-button-icon { transform: scale(0.9); }
+
+.refresh-button:disabled { cursor: default; }
+
+.refresh-button.is-refreshing {
+  color: var(--accent);
+  border-color: rgba(var(--accent-rgb), 0.58);
+  background: rgba(var(--accent-rgb), 0.1);
+  box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.12), 0 0 0 1px rgba(var(--accent-rgb), 0.1);
+}
+
+.refresh-button.is-refreshed {
+  color: var(--success);
+  border-color: rgba(var(--success-rgb), 0.64);
+  background: rgba(var(--success-rgb), 0.12);
+  box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.12), 0 0 12px rgba(var(--success-rgb), 0.18);
+}
+
+.settings-icon-button {
+  display: inline-grid;
+  place-items: center;
+}
+
+.settings-icon-button::before {
+  content: "";
+  width: 13px;
+  height: 13px;
+  background: currentColor;
+  -webkit-mask: url("icons/lucide-settings.svg") center / contain no-repeat;
+  mask: url("icons/lucide-settings.svg") center / contain no-repeat;
+}
+
+/* 参考用 #footerActionSlot .utility-actions 覆写底栏按钮尺寸，这里对应 .footer。 */
+/* 参考把刷新与设置放在 .utility-actions 组里，两者相距 6px
+   （刷新按钮绝对定位在 right: calc(100% + 6px)）；本项目的 footer 间距是 8px，
+   所以这一组自己声明 6px。 */
+.utility-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.footer .icon-button,
+.footer .refresh-button { height: 30px; font-size: 16px; }
+
+/* 参考的 is-refreshing 会切换成 spinner.svg（本项目不引入该资源），
+   改为让 ↻ 字形自身旋转，视觉等价。 */
+.refresh-button.is-refreshing .refresh-button-icon { animation: refresh-spin 900ms linear infinite; }
+@keyframes refresh-spin { to { transform: rotate(360deg); } }
+
+/* ↓ 这三条是"整块替换"时被漏掉的：底栏容器本身、胶囊容器、中间状态文字。
+   缺了它们 footer 会退化成竖排（.view-switcher 也就不是 flex 了）。 */
+
+.footer {
+  --view-switcher-max-width: min(150px, 52%);
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.view-switcher {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  max-width: var(--view-switcher-max-width);
+  flex: 0 1 auto;
+  align-items: center;
+  margin-right: auto;
+}
+
+/* 本项目自有的中间状态文字（参考里对应 .live-token-rate）。 */
+.bottombar-status {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.2;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bottombar-status.error { color: var(--red); }
+
+.icon-button.active {
+  border-color: rgba(var(--accent-rgb), 0.58);
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+/* ==========================================================================
+   设置面板与手风琴：规则逐字取自 token-monitor 的 renderer/styles.css（MIT）。
+   本节曾被一次范围写错的整块替换误删，这份是按原配方重新生成的。
+   不要凭理解手改这里的数值，要改请连同参考一起改。
+   ========================================================================== */
+
+.settings-panel {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  max-height: calc(100vh - 72px);
+  padding: 2px 0 4px;
+  opacity: 1;
+  overflow: hidden auto;
+  scrollbar-width: none;
+  transform: translateY(0);
+  transition: max-height 140ms ease, opacity 120ms ease, padding 140ms ease, transform 140ms ease;
+}
+
+.settings-panel::-webkit-scrollbar { width: 0; height: 0; }
+
+.settings-panel.hidden {
+  /* Animates out rather than disappearing, so it must keep its box. Higher
+     specificity than the blanket `.hidden`, and matching weight to beat it. */
+  display: grid !important;
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+}
+
+.settings-panel label, .settings-field { display: grid; min-width: 0; gap: 4px; color: var(--muted); font-size: 11px; }
+
+.settings-group { display: grid; min-width: 0; gap: 8px; }
+
+.settings-collapsible-group {
+  gap: 0;
+  min-width: 0;
+  border: 1px solid rgba(var(--line-rgb), 0.10);
+  border-radius: 0;
+  background: rgba(var(--panel-rgb), 0.35);
+  /* clip, not hidden: the settings panel is a max-height-constrained grid, and
+     overflow:hidden would zero this item's automatic minimum size, letting the
+     grid squash every card. clip rounds the corners without becoming a scroll
+     container, so intrinsic sizing (and the panel's own scrolling) survive. */
+  overflow: clip;
+  transition: background 140ms ease;
+}
+
+.settings-collapsible-group + .settings-collapsible-group {
+  border-top: 0;
+  box-shadow: inset 0 1px 0 rgba(var(--line-rgb), 0.07);
+}
+
+.settings-collapsible-group:first-child { border-radius: 12px 12px 0 0; }
+
+.settings-collapsible-group:last-child { border-radius: 0 0 12px 12px; }
+
+.settings-collapsible-group.expanded {
+  background: rgba(var(--panel-rgb), 0.55);
+}
+
+.settings-section-toggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 9px 11px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-collapsible-group.expanded > .settings-section-toggle {
+  border-bottom: 1px solid rgba(var(--line-rgb), 0.08);
+}
+
+.settings-section-toggle:hover, .settings-section-toggle:focus-visible {
+  background: rgba(var(--overlay-rgb), var(--control-alpha));
+  color: var(--text);
+}
+
+.settings-section-toggle:focus-visible {
+  outline: 1px solid rgba(115, 189, 245, 0.72);
+  outline-offset: 1px;
+}
+
+.settings-section-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.settings-section-heading > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-section-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.settings-section-disclosure {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  color: var(--muted);
+  font-size: 0;
+  line-height: 0;
+  transform-origin: center;
+  transition: transform 140ms ease;
+}
+
+.settings-section-disclosure::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-1.5px) rotate(45deg);
+}
+
+.accordion-animated-container {
+  display: grid !important;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 250ms cubic-bezier(0.4, 0, 0.2, 1), margin-top 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  min-width: 0;
+}
+
+.accordion-animated-container.hidden {
+  /* Animates out rather than disappearing, so it must keep its box. Higher
+     specificity than the blanket `.hidden`, and matching weight to beat it. */
+  display: grid !important;
+  grid-template-rows: 0fr;
+  pointer-events: none;
+  margin-top: 0 !important;
+}
+
+.accordion-animation-inner {
+  overflow: hidden;
+  opacity: 1;
+  transition: opacity 250ms ease;
+  min-height: 0;
+}
+
+.accordion-animated-container.hidden > .accordion-animation-inner {
+  opacity: 0;
+}
+
+.settings-section-details {
+  min-width: 0;
+}
+
+.settings-section-details-inner {
+  display: grid;
+  min-width: 0;
+  gap: 0;
+  padding: 2px 11px 0;
+}
+
+.settings-section-details-inner > * + * {
+  margin-top: 10px;
+}
+
+.settings-panel label.settings-item, .settings-panel .settings-item {
+  display: flex;
+  flex-wrap: wrap; /* row line 1 = title + control; a description wraps to a full-width line 2 */
+  align-items: center;
+  gap: 3px 12px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 5px 0;
+  color: var(--text);
+  font-size: 11px;
+}
+
+.settings-item + .settings-item {
+  border-top: 1px solid rgba(var(--line-rgb), 0.06);
+}
+
+.settings-item-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.settings-item-title { color: var(--text); }
+
+.settings-item-desc, p.settings-note.settings-item-desc, span.settings-note.settings-item-desc {
+  margin: 0;
+  color: var(--muted);
+  font-size: 9.5px;
+  line-height: 1.5;
+}
+
+.settings-item > .settings-item-desc {
+  flex-basis: 100%;
+  min-width: 0;
+  padding-bottom: 2px;
+  order: 3; /* after the checkbox-label input (order: 2) so the control stays on the title line */
+}
+
+.settings-item > .settings-item-desc:empty { display: none; }
+
+.settings-item-value {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.settings-item-value strong { color: var(--text); font-weight: 600; }
+
+.settings-group > * + * {
+  margin-top: 8px;
+}
+
+.settings-group {
+  gap: 0 !important;
+}
+
+.settings-section-summary {
+  min-width: 0;
+  max-width: 150px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9.5px;
+  line-height: 1.25;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-section-icon {
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+  background-color: currentColor;
+  color: var(--muted);
+  opacity: 0.85;
+  transition: color 140ms ease, opacity 140ms ease;
+  -webkit-mask: var(--settings-section-icon-url) center / contain no-repeat;
+  mask: var(--settings-section-icon-url) center / contain no-repeat;
+}
+
+.settings-collapsible-group.expanded > .settings-section-toggle .settings-section-disclosure {
+  transform: rotate(180deg);
+}
+
+/* 展开后的上下留白挂在首/末子元素的 padding 上（参考的做法）：子元素 padding 会被
+   .accordion-animation-inner 的 overflow:hidden 裁掉，不会像内层自身 padding 那样溢出。 */
+.settings-section-details-inner > :first-child { padding-top: 2px; }
+.settings-section-details-inner > :last-child { padding-bottom: 10px; }
+
+/* 展开时分区图标点亮为主题色（参考有、上一版漏抄）。 */
+.settings-collapsible-group.expanded .settings-section-icon {
+  color: var(--accent);
+  opacity: 1;
+}
+
+/* 折叠时把内层自身的 padding 归零。border-box 的高度下限 = padding 之和，而内层被
+   拉伸到 0 高的轨道上，那 2px padding-top 会溢出来，在折叠头下沿与下一条发丝线之间
+   留下一条缝，悬停高亮因此"上面贴住、下面贴不住"。参考也有这条缝，这里修掉。 */
+.accordion-animated-container.hidden > .accordion-animation-inner {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* 非末张卡去掉下边框：否则接缝是"上一张的下边框 + 下一张的 inset 线"两条，且卡内
+   的悬停高亮够不到自己的边框，与下面那条线之间永远隔着 1px。 */
+.settings-collapsible-group:not(:last-child) { border-bottom: 0; }
+
+/* 分区图标：本项目自绘的类名映射到 Lucide 文件（参考是 settings/general.svg 等）。 */
+.icon-sec-general { --settings-section-icon-url: url("icons/lucide-sliders.svg"); }
+.icon-sec-appearance { --settings-section-icon-url: url("icons/lucide-palette.svg"); }
+.icon-sec-main { --settings-section-icon-url: url("icons/lucide-panels.svg"); }
+.icon-sec-typing { --settings-section-icon-url: url("icons/typing.svg"); }
+
+/* 行尾按钮组（参考里这类行用 .settings-item-value 承载文本，本项目放按钮）。 */
+.settings-item-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
+
+/* 背景图那一行显示的是文件完整路径，长了要截断而不是把行撑开；完整路径在 title 上。 */
+#bgDesc { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ------------------------------------------------------------------ toast */
+
+.toast {
+  position: fixed;
+  left: 14px;
+  right: 14px;
+  bottom: 52px;
+  z-index: 40;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(var(--panel-rgb), 0.92);
+  color: var(--text);
+  font-size: 10.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  box-shadow: 0 12px 30px var(--shadow);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  cursor: pointer; /* 点一下可关闭 */
+  transform: translateY(0);
+  opacity: 1;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+.toast.hidden {
+  display: block;
+  opacity: 0;
+  transform: translateY(6px);
+  pointer-events: none;
+}
+.toast.ok { border-color: rgba(var(--success-rgb), 0.45); }
+.toast.error { border-color: rgba(var(--red-rgb), 0.5); color: #ffd9df; }
+
+@media (max-height: 280px) {
+  .footer { display: none; }
+}
+@media (max-height: 240px) {
+  .panel { display: none; }
+}
+@media (max-height: 200px) {
+  .shell { gap: 8px; padding: 12px 14px; }
+  .titlebar { min-height: clamp(28px, 8vh, 38px); }
+  .hero { padding: 2px 2px; }
+  .hero-text { font-size: clamp(15px, 6vw, 22px); }
+}
+
+/* ------------------------------------------------------------------ 文案装饰 */
+/* 打字机上方的小字：和参考的 TOTAL TOKENS 同族（大写 + 字距 + 次要色） */
+.hero-label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+/* 署名：紧跟打字机下方，左对齐 —— 位置对标参考的 cost 行（大字下面那一行） */
+.signature {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+  opacity: 0.85;
+}
+
+/* 兜底：面板必须能压到 0 并自己滚。放文件末尾是因为前面有同优先级的 .panel 规则，
+   写在中间会被它们反压 —— 这个坑我已经踩过两次（footer 那次也是）。 */
+.panel { min-height: 0; }
+
+/* 创建表单里的开关行（沿用设置面板的 .switch 外观） */
+.create-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* 粘贴图片区 */
+.paste-zone {
+  display: grid;
+  min-height: 135px;
+  place-items: center;
+  gap: 6px;
+  padding: 8px;
+  border: 1px dashed rgba(var(--line-rgb), 0.35);
+  border-radius: 10px;
+  background: rgba(var(--overlay-rgb), 0.02);
+  cursor: pointer;
+}
+.paste-zone:focus-visible { outline: 1px solid rgba(var(--blue-rgb), 0.72); outline-offset: 2px; }
+.paste-preview { max-width: 100%; max-height: 148px; border-radius: 6px; }
+.paste-hint { color: var(--muted); font-size: 11px; }
+/* 粘贴区的清除按钮；以及明确写一条 .hidden —— 现有的 .hidden 覆盖不到 span，
+   所以之前缩略图和提示会同时显示 */
+.paste-zone { position: relative; }
+.paste-clear {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid rgba(var(--line-rgb), 0.28);
+  border-radius: 5px;
+  background: rgba(var(--overlay-rgb), 0.06);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.paste-clear:hover { color: var(--text); }
+.paste-hint.hidden, .paste-preview.hidden, .paste-clear.hidden { display: none; }
+
+/* 新建页顶部：目录单独一行，下面是三个模式按钮（照参考 .tabs，占满整行） */
+.create-tabs {
+  width: 100%;
+  /* minmax(0, 1fr) 不能省：grid 列默认最小尺寸是内容宽度，三个中文按钮会把
+     列撑开、整行比窗口宽，第三个按钮就被挤出可视区 */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.create-dir { margin-bottom: 2px; }
+
+/* 模块级的显示开关：现有的 .hidden 只覆盖了 .view / span / p 等，
+   覆盖不到 <section class="module">，所以三个模式块会全部竖着列出来。
+   这条和 .create-tabs 的显式 grid 都写在文件末尾，避免被同优先级规则反压。 */
+.module.hidden { display: none; }
+.create-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* 指示块的宽度必须跟着列数走：(100% - 左右 padding 6 - 列间 gap 2) / 2。
+   沿用三列时代的 /3 会让它漂到中间、看起来像个空盒子。 */
+.create-tabs .tab-indicator { width: calc((100% - 8px) / 2); }
+
+/* 新建页的头（目录 + 模式按钮）。
+   它被放在滚动区之外（和打字机一样），所以不需要 sticky、也不需要自己的底色 ——
+   直接坐在 shell 的玻璃上，天然透明。之前钉在面板里，必须自带不透明底才挡得住
+   滚上来的内容，结果就是和 shell 的玻璃对不上。 */
+.create-head {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 10px;
+  min-width: 0;
+}
+.create-head.hidden { display: none; }
+
+/* 分段控件的选中态：改用静态高亮，不用滑动指示块。
+   原因：指示块在这里推不动 —— 内联 transform 写进去是
+   translate3d(calc(100% + 2px), 0, 0)，但计算值一直是 matrix(1,0,0,1,0,0)，
+   元素存在、值合法、函数也确实跑到，就是不动。与其留一个会骗人的滑动块，
+   不如让选中项自己亮起来：视觉上等价，行为确定。 */
+.tab-indicator { display: none; }
+.tab.active {
+  border-color: rgba(var(--line-rgb), 0.13);
+  background: rgba(var(--overlay-rgb), 0.06);
+  box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.075);
+}
+
+/* 表单里并排两个字段（日期 / 置顶）。窄窗口下退回一列，免得两个输入框都挤扁。 */
+.field-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+}
+/* 窄到 280 以下才把并排的两列拆开。原来是 320 —— 你那个宽度（约 319）刚好被它
+   命中，所以并排的几行全都展开成了单列。数值就是个阈值，觉得还大就说个数。 */
+@media (max-width: 280px) {
+  .field-row { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* 标题栏置顶按钮的激活态：和 shell 的主题色一致，一眼看出当前是置顶的 */
+.icon-button.is-active {
+  border-color: rgba(var(--accent-rgb), 0.45);
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
+}
+
+.paste-preview { cursor: zoom-in; }
+
+/* ---------------------------------------------------------------- 图片预览窗口 */
+.preview-title {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.preview-stage {
+  display: grid;
+  flex: 1 1 0;
+  min-height: 0;
+  place-items: center;
+  overflow: auto;
+}
+.preview-image {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+/* 保存图片按钮：接上图之后变成明确的绿色（主题色）。
+   不加这条时，它和"还没接图"的禁用态一样灰扑扑的，看不出能不能点。
+   用浓一档的主题色底 + 实边，而不是纯色填充 —— 这样换成任何主题色都保证文字可读。 */
+
+/* 保存图片按钮：接上图之后变成明确的绿色（主题色）。
+   注意两点，都是踩过的坑：
+     1. 这条选择器要带 id —— 按钮曾经套在 .settings-actions 里，那里有条 (0,1,1) 的规则
+        会压住 .btn-primary 的配色，结果按钮一直是灰的（包装已移除，id 保留双保险）；
+     2. 验证时别只看 getComputedStyle —— 无头环境里它的读数和实际渲染不一致，
+        我为此白改了三轮。截图才是准的。 */
+#pasteSaveBtn.is-ready {
+  border-color: rgba(var(--accent-rgb), 0.75);
+  background: rgba(var(--accent-rgb), 0.34);
+  color: var(--accent);
+  box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.14);
+}
+#pasteSaveBtn.is-ready:hover { background: rgba(var(--accent-rgb), 0.46); }
+
+/* 底栏状态点：窄窗下文字让位，靠它表示状态（绿=本地预览在跑） */
+.status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: rgba(var(--line-rgb), 0.28);
+  vertical-align: middle;
+  transition: background 160ms ease;
+}
+.bottombar-status.is-running .status-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.28);
+}
+
