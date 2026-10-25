@@ -75,6 +75,15 @@ echo "→ 校验"
 plutil -lint "$PLIST" >/dev/null && echo "  Info.plist 合法"
 codesign --verify --deep --strict "$APP" && echo "  签名校验通过"
 echo "  包大小：$(du -sh "$APP" | cut -f1)"
+# INSTALL=1 时顺手同步到 /Applications —— 用 ditto，保留框架里的符号链接与签名。
+# 这次踩的坑：重打包只更新了 dist/，而实际启动的是 /Applications 里那份旧副本。
+if [ "${INSTALL:-0}" = "1" ]; then
+  echo "→ 同步到 /Applications/$NAME.app"
+  ditto "$APP" "/Applications/$NAME.app"
+  codesign --verify --deep --strict "/Applications/$NAME.app" && echo "  /Applications 副本签名校验通过"
+fi
+
 echo
 echo "完成：$APP"
 echo "双击即可运行；命令行：open \"$APP\""
+[ "${INSTALL:-0}" = "1" ] && echo "已同步：/Applications/$NAME.app"
