@@ -69,17 +69,20 @@ function syncPinButton() {
   button.title = on ? '取消置顶' : '置顶（浮在其他窗口上方）';
 }
 
+// 置顶开关。
+//
+// 取反的依据必须是**窗口的真实状态**，不能是渲染层这份 settings —— 它可能因为保存
+// 响应重投影、多窗口等原因和 reality 脱节，一旦脱节就会一直算成"要打开"，于是点了
+// 关不掉。所以这里不传参数，由主进程按 isAlwaysOnTop() 自己取反，再把结果回传。
 async function toggleAlwaysOnTop() {
   const button = $('pinBtn');
-  const next = !(settings && settings.alwaysOnTop === true);
+  if (typeof api.setAlwaysOnTop !== 'function') {
+    showToast('置顶需要重启应用\n（改过 main.js / preload.js 后 Cmd+R 不够）', 'error', 8000);
+    return;
+  }
   if (button) button.disabled = true;
   try {
-    if (typeof api.setAlwaysOnTop !== 'function') {
-      // 这条通道在主进程里：只按 Cmd+R 重载渲染层是拿不到的
-      showToast('置顶需要重启应用\n（改过 main.js / preload.js 后 Cmd+R 不够）', 'error', 8000);
-      return;
-    }
-    const applied = await api.setAlwaysOnTop(next);
+    const applied = await api.setAlwaysOnTop();
     if (!applied || !applied.ok) {
       showToast(`切换置顶失败：${(applied && applied.error) || '未知原因'}`, 'error', 8000);
       return;
